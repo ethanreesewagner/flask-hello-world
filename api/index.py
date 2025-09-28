@@ -3,9 +3,9 @@ from flask.cli import routes_command
 from flask.typing import RouteCallable
 from langchain_community.document_loaders.pdf import PyPDFLoader
 import tempfile
-import os
 from langchain.text_splitter import RecursiveCharacterTextSplitter
-from pinecone.grpc import PineconeGRPC as Pinecone
+import os
+from pinecone import Pinecone, ServerlessSpec  # ServerlessSpec only if you create indexes
 from dotenv import dotenv_values
 from openai import OpenAI
 from .agent_functions import process_user_input
