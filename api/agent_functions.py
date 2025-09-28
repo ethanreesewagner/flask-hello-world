@@ -8,7 +8,6 @@ import json
 from langchain.prompts import PromptTemplate
 
 config=dotenv_values(".env")
-
 @tool
 def get_info(tool_input: str) -> str:
     """Searches for information in a given file based on a query. Input should be a JSON string with 'query' and 'file_path' keys."""
