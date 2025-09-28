@@ -1,4 +1,12 @@
 {
+  "functions": {
+    "api/**/*.py": {
+      "maxDuration": 900
+    }
+  },
+  "env": {
+    "VERCEL_FORCE_NO_BUILD_CACHE": "1"
+  },
   "rewrites": [
     { "source": "/(.*)", "destination": "/api/index" }
   ]

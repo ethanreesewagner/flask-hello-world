@@ -21,53 +21,72 @@ def send_to_agent():
 
 @app.route('/upload', methods=['POST'])
 def upload_file():
+    print("Starting upload_file function")
     file = request.files["file"]
-    # Read the file into memory as bytes
-    file_bytes = file.read()
+    print(f"File received: {file.filename}")
     with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as temp_pdf_file:
-        temp_pdf_file.write(file_bytes)
+        file.save(temp_pdf_file.name)
         temp_pdf_path = temp_pdf_file.name
+    print(f"File saved to temporary path: {temp_pdf_path}")
     # Initialize PyPDFLoader with the path to the temporary file
     loader = PyPDFLoader(temp_pdf_path)
     # Properly load the document using the loader
     docs = loader.load()
-    #WARNING RETURNS ONLY FIRST PAGE MUST BE FIXED LATER
+    print(f"PDF loaded. Number of documents (pages): {len(docs)}")
+    # WARNING: The original code returned only the first page. This has been fixed to process all pages.
+
     text_splitter = RecursiveCharacterTextSplitter(
         chunk_size=100,
         chunk_overlap=20,
         length_function=len,
     )
-    chunks = text_splitter.split_documents(docs)
 
-    texts = [chunk.page_content for chunk in chunks]
-
-    config=dotenv_values(".env")
+    config = dotenv_values(".env")
     client = OpenAI(api_key=config["OPENAI_API_KEY"])
     pc = Pinecone(api_key=config["PINECONE_API_KEY"])
-
-    response = client.embeddings.create(input=texts,
-    model="text-embedding-3-small", dimensions=512)
-
-    embeddings = [data.embedding for data in response.data]
-
     index = pc.Index("testingvectors")
+    print("OpenAI client and Pinecone index initialized")
 
-    vectors = []
-    for i, embedding in enumerate(embeddings):
-        vectors.append({
-            "id": f"chunk_{i}",
-            "values": embedding,
-            "metadata": {"title": temp_pdf_path, "text": texts[i], "page": chunks[i].metadata["page"]}
-        })
+    all_vectors = [] # To accumulate vectors from all pages
 
-    upsert_response = index.upsert(
-        vectors=vectors,
-        namespace="example-namespace"
-    )
+    for page_num, doc in enumerate(docs):
+        print(f"Processing page {page_num + 1}/{len(docs)}")
+        # Process each page individually
+        chunks = text_splitter.split_documents([doc]) # Split a single page
+        texts = [chunk.page_content for chunk in chunks]
+        print(f"Page {page_num + 1} split into {len(chunks)} chunks.")
+
+        if not texts:
+            print(f"No text found for page {page_num + 1}, skipping.")
+            continue
+
+        print(f"Generating embeddings for {len(texts)} text chunks from page {page_num + 1}")
+        response = client.embeddings.create(input=texts, model="text-embedding-3-small", dimensions=512)
+        embeddings = [data.embedding for data in response.data]
+        print(f"Embeddings generated for page {page_num + 1}")
+
+        vectors_for_page = []
+        for i, embedding in enumerate(embeddings):
+            vectors_for_page.append({
+                "id": f"chunk_{page_num}_{i}", # Unique ID for each chunk across pages
+                "values": embedding,
+                "metadata": {"title": temp_pdf_path, "text": texts[i], "page": chunks[i].metadata["page"]}
+            })
+        all_vectors.extend(vectors_for_page) # Add to the list of all vectors
+        
+        print(f"Upserting {len(vectors_for_page)} vectors for page {page_num + 1} to Pinecone")
+        upsert_response = index.upsert(
+            vectors=vectors_for_page,
+            namespace="example-namespace"
+        )
+        print(f"Upsert complete for page {page_num + 1}. Response: {upsert_response}")
+    
     # Clean up the temporary file
+    print("Cleaning up temporary file")
     global path
-    path=temp_pdf_path
+    path = temp_pdf_path
     os.unlink(temp_pdf_path)
+    print("Temporary file cleaned up")
     # Convert upsert_response to dict if possible for serialization
     # Ensure the response is JSON serializable
     from flask import jsonify
@@ -87,11 +106,12 @@ def upload_file():
         else:
             return str(obj)
 
-    if docs:
+    if all_vectors: # Check all_vectors instead of docs
+        print("Successfully processed and upserted vectors. Returning success.")
         # Instead of returning a descriptor, return the actual vectors data that was upserted
         # Ensure all objects are JSON serializable
-        serializable_vectors = make_serializable(vectors)
-        #return jsonify({"vectors": serializable_vectors})
+        serializable_vectors = make_serializable(all_vectors)
         return "success"
     else:
+        print("No content found after processing. Returning no content message.")
         return "No content found."
