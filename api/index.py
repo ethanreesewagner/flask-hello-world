@@ -72,7 +72,6 @@ def upload_file():
     # Convert upsert_response to dict if possible for serialization
     # Ensure the response is JSON serializable
     from flask import jsonify
-
     def make_serializable(obj):
         # Recursively convert objects to serializable types
         if isinstance(obj, dict):
