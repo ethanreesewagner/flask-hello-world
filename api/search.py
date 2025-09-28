@@ -1,4 +1,4 @@
-from pinecone import Pinecone, ServerlessSpec  # ServerlessSpec only if you create indexes
+from pinecone.grpc import PineconeGRPC as Pinecone
 from dotenv import dotenv_values
 from openai import OpenAI
 config=dotenv_values(".env")

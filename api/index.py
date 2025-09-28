@@ -3,9 +3,9 @@ from flask.cli import routes_command
 from flask.typing import RouteCallable
 from langchain_community.document_loaders.pdf import PyPDFLoader
 import tempfile
-from langchain.text_splitter import RecursiveCharacterTextSplitter
 import os
-from pinecone import Pinecone, ServerlessSpec  # ServerlessSpec only if you create indexes
+from langchain.text_splitter import RecursiveCharacterTextSplitter
+from pinecone.grpc import PineconeGRPC as Pinecone
 from dotenv import dotenv_values
 from openai import OpenAI
 from .agent_functions import process_user_input
@@ -71,6 +71,7 @@ def upload_file():
     # Convert upsert_response to dict if possible for serialization
     # Ensure the response is JSON serializable
     from flask import jsonify
+
     def make_serializable(obj):
         # Recursively convert objects to serializable types
         if isinstance(obj, dict):
