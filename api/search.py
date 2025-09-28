@@ -1,7 +1,6 @@
 from pinecone import Pinecone, ServerlessSpec  # ServerlessSpec only if you create indexes
 from dotenv import dotenv_values
 from openai import OpenAI
-
 config=dotenv_values(".env")
 client = OpenAI(api_key=config["OPENAI_API_KEY"])
 pc = Pinecone(api_key=config["PINECONE_API_KEY"])
