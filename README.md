@@ -19,7 +19,7 @@ npm i -g vercel
 vercel dev
 ```
 
-Your Flask application is now available at `http://localhost:3000`.
+Your Flask application is now available at `http://localhost:3000`
 
 ## One-Click Deploy
 
