@@ -1,3 +1,4 @@
+
 Flask==3.0.3
 langchain>=0.2
 langchain-community>=0.2
@@ -5,5 +6,4 @@ openai>=1.0
 pinecone-client[grpc]==3.2.1
 python-dotenv>=1.0
 langchain-openai==0.3.32
-
 
