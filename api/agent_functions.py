@@ -2,12 +2,13 @@ from langchain import hub
 from langchain_openai import ChatOpenAI
 from langchain.agents import AgentExecutor, create_react_agent
 from api.search import search
-from dotenv import dotenv_values
+from dotenv import load_dotenv
 from langchain.tools import tool
 import json
+import os
 from langchain.prompts import PromptTemplate
 
-config=dotenv_values(".env")
+load_dotenv()
 @tool
 def get_info(tool_input: str) -> str:
     """Searches for information in a given file based on a query. Input should be a JSON string with 'query' and 'file_path' keys."""
@@ -52,7 +53,7 @@ llm = ChatOpenAI(
     max_tokens=None,
     timeout=None,
     max_retries=2,
-    api_key=config["OPENAI_API_KEY"]
+    api_key=os.getenv("OPENAI_API_KEY")
 )    
 tools = [get_info]
 

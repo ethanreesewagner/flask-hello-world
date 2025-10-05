@@ -6,10 +6,11 @@ import tempfile
 import os
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from pinecone.grpc import PineconeGRPC as Pinecone
-from dotenv import dotenv_values
+from dotenv import load_dotenv
 from openai import OpenAI
 from .agent_functions import process_user_input
 
+load_dotenv()
 path=""
 app = Flask(__name__)
 
@@ -41,9 +42,8 @@ def upload_file():
         length_function=len,
     )
 
-    config = dotenv_values(".env")
-    client = OpenAI(api_key=config["OPENAI_API_KEY"])
-    pc = Pinecone(api_key=config["PINECONE_API_KEY"])
+    client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+    pc = Pinecone(api_key=os.getenv("PINECONE_API_KEY"))
     index = pc.Index("testingvectors")
     print("OpenAI client and Pinecone index initialized")
 
