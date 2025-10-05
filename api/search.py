@@ -16,3 +16,4 @@ def search(query,file_path):
     }
     results = index.query(vector=list(query_vector.data[0].embedding), top_k=5, include_metadata=True, namespace="example-namespace", filter=query_filter)
     return results
+
