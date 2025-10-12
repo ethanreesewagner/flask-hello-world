@@ -11,13 +11,13 @@ from openai import OpenAI
 from .agent_functions import process_user_input
 
 load_dotenv()
-path=""
 app = Flask(__name__)
 
 @app.route('/agent', methods=['POST'])
 def send_to_agent():
     data = request.get_json()
     message=data["message"]
+    path=data["path"]
     return process_user_input(message+f" The path is {path}")
 
 @app.route('/upload', methods=['POST'])
@@ -84,8 +84,6 @@ def upload_file():
         
         # Clean up the temporary file
         print("Cleaning up temporary file")
-        global path
-        path = temp_pdf_path
         os.unlink(temp_pdf_path)
         print("Temporary file cleaned up")
         # Convert upsert_response to dict if possible for serialization
@@ -112,7 +110,7 @@ def upload_file():
             # Instead of returning a descriptor, return the actual vectors data that was upserted
             # Ensure all objects are JSON serializable
             serializable_vectors = make_serializable(all_vectors)
-            return "success"
+            return temp_pdf_path
         else:
             print("No content found after processing. Returning no content message.")
             return "No content found."
