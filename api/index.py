@@ -104,7 +104,6 @@ def upload_file():
                 return obj
             else:
                 return str(obj)
-
         if all_vectors: # Check all_vectors instead of docs
             print("Successfully processed and upserted vectors. Returning success.")
             # Instead of returning a descriptor, return the actual vectors data that was upserted
