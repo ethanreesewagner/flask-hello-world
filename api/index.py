@@ -17,8 +17,8 @@ app = Flask(__name__)
 def send_to_agent():
     data = request.get_json()
     message=data["message"]
-    path=data["path"]
-    return process_user_input(message+f" The path is {path}")
+    id=data["id"]
+    return process_user_input(message+f" The id is {id}")
 
 @app.route('/upload', methods=['POST'])
 def upload_file():
@@ -78,7 +78,7 @@ def upload_file():
             print(f"Upserting {len(vectors_for_page)} vectors for page {page_num + 1} to Pinecone")
             upsert_response = index.upsert(
                 vectors=vectors_for_page,
-                namespace="example-namespace"
+                namespace=request.form["id"]
             )
             print(f"Upsert complete for page {page_num + 1}. Response: {upsert_response}")
         

@@ -58,7 +58,7 @@ llm = ChatOpenAI(
 tools = [get_info]
 
 agent = create_react_agent(llm, tools, prompt=prompt_template)
-agent_executor = AgentExecutor(agent=agent, tools=tools, handle_parsing_errors=True)
+agent_executor = AgentExecutor(agent=agent, tools=tools, handle_parsing_errors=True, max_execution_time=60, max_iterations=60)
 
 # Use with chat history
 from langchain_core.messages import AIMessage, HumanMessage
