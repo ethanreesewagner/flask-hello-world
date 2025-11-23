@@ -7,7 +7,6 @@ from langchain.tools import tool
 import json
 import os
 from langchain.prompts import PromptTemplate
-
 load_dotenv()
 @tool
 def get_info(tool_input: str) -> str:
