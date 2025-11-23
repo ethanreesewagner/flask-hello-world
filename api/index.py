@@ -10,7 +10,6 @@ from dotenv import load_dotenv
 from openai import OpenAI
 from .agent_functions import process_user_input
 from flask_cors import CORS
-
 load_dotenv()
 app = Flask(__name__)
 CORS(app)
