@@ -2,7 +2,6 @@ from pinecone.grpc import PineconeGRPC as Pinecone
 from dotenv import load_dotenv
 from openai import OpenAI
 import os
-
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 load_dotenv()
 pc = Pinecone(api_key=os.getenv("PINECONE_API_KEY"))
