@@ -9,8 +9,10 @@ from pinecone.grpc import PineconeGRPC as Pinecone
 from dotenv import load_dotenv
 from openai import OpenAI
 from .agent_functions import process_user_input
+
 load_dotenv()
 app = Flask(__name__)
+CORS(app)
 
 @app.route('/agent', methods=['POST'])
 def send_to_agent():
