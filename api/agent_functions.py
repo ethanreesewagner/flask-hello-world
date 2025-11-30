@@ -56,9 +56,6 @@ llm = ChatOpenAI(
 )    
 tools = [get_info]
 
-agent = create_react_agent(llm, tools, prompt=prompt_template)
-agent_executor = AgentExecutor(agent=agent, tools=tools, handle_parsing_errors=True, max_execution_time=60, max_iterations=60)
-
 # Use with chat history
 from langchain_core.messages import AIMessage, HumanMessage
 
@@ -97,7 +94,8 @@ while True:
 
 def process_user_input(user_input: str):
     #Takes user input, saves it to chat history, invokes the agent, saves agent output to history, and returns agent output.
-
+    agent = create_react_agent(llm, tools, prompt=prompt_template)
+    agent_executor = AgentExecutor(agent=agent, tools=tools, handle_parsing_errors=True, max_execution_time=60, max_iterations=10)
     chat_history_list.append(HumanMessage(content=user_input))
     formatted_chat_history = _format_chat_history(chat_history_list)
 
