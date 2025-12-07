@@ -4,6 +4,7 @@ from flask.typing import RouteCallable
 from langchain_community.document_loaders.pdf import PyPDFLoader
 import tempfile
 import os
+import logging
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from pinecone.grpc import PineconeGRPC as Pinecone
 from dotenv import load_dotenv
@@ -11,31 +12,71 @@ from openai import OpenAI
 from .agent_functions import process_user_input
 from flask_cors import CORS
 load_dotenv()
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
+
 app = Flask(__name__)
 CORS(app)
 
 @app.route('/agent', methods=['POST'])
 def send_to_agent():
-    data = request.get_json()
-    message = data["message"]
-    conversation_id = data["id"]
-    return process_user_input(message, conversation_id)
+    try:
+        logger.info("Received request to /agent endpoint")
+        data = request.get_json()
+        if not data:
+            logger.warning("No JSON data received in /agent request")
+            return "No data provided", 400
+        
+        message = data.get("message")
+        conversation_id = data.get("id")
+        
+        if not message:
+            logger.warning("No message provided in /agent request")
+            return "No message provided", 400
+        
+        if not conversation_id:
+            logger.warning("No conversation ID provided in /agent request")
+            return "No conversation ID provided", 400
+        
+        logger.info(f"Processing agent request - conversation_id: {conversation_id}, message length: {len(message)}")
+        result = process_user_input(message, conversation_id)
+        logger.info(f"Agent request completed successfully for conversation_id: {conversation_id}")
+        return result
+    except Exception as e:
+        logger.error(f"Error in /agent endpoint: {str(e)}", exc_info=True)
+        return f"Error processing request: {str(e)}", 500
 
 @app.route('/upload', methods=['POST'])
 def upload_file():
     try:
-        print("Starting upload_file function")
+        logger.info("Starting upload_file function")
+        if "file" not in request.files:
+            logger.warning("No file provided in upload request")
+            return "No file provided", 400
+        
         file = request.files["file"]
-        print(f"File received: {file.filename}")
+        logger.info(f"File received: {file.filename}, content_type: {file.content_type}")
+        if "id" not in request.form:
+            logger.warning("No conversation ID provided in upload request")
+            return "No conversation ID provided", 400
+        
+        conversation_id = request.form["id"]
+        logger.info(f"Upload request for conversation_id: {conversation_id}")
+        
         with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as temp_pdf_file:
             file.save(temp_pdf_file.name)
             temp_pdf_path = temp_pdf_file.name
-        print(f"File saved to temporary path: {temp_pdf_path}")
+        logger.info(f"File saved to temporary path: {temp_pdf_path}")
         # Initialize PyPDFLoader with the path to the temporary file
         loader = PyPDFLoader(temp_pdf_path)
         # Properly load the document using the loader
         docs = loader.load()
-        print(f"PDF loaded. Number of documents (pages): {len(docs)}")
+        logger.info(f"PDF loaded. Number of documents (pages): {len(docs)}")
         # WARNING: The original code returned only the first page. This has been fixed to process all pages.
 
         text_splitter = RecursiveCharacterTextSplitter(
@@ -47,25 +88,25 @@ def upload_file():
         client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
         pc = Pinecone(api_key=os.getenv("PINECONE_API_KEY"))
         index = pc.Index("testingvectors")
-        print("OpenAI client and Pinecone index initialized")
+        logger.info("OpenAI client and Pinecone index initialized")
 
         all_vectors = [] # To accumulate vectors from all pages
 
         for page_num, doc in enumerate(docs):
-            print(f"Processing page {page_num + 1}/{len(docs)}")
+            logger.info(f"Processing page {page_num + 1}/{len(docs)} for conversation_id: {conversation_id}")
             # Process each page individually
             chunks = text_splitter.split_documents([doc]) # Split a single page
             texts = [chunk.page_content for chunk in chunks]
-            print(f"Page {page_num + 1} split into {len(chunks)} chunks.")
+            logger.debug(f"Page {page_num + 1} split into {len(chunks)} chunks.")
 
             if not texts:
-                print(f"No text found for page {page_num + 1}, skipping.")
+                logger.warning(f"No text found for page {page_num + 1}, skipping.")
                 continue
 
-            print(f"Generating embeddings for {len(texts)} text chunks from page {page_num + 1}")
+            logger.info(f"Generating embeddings for {len(texts)} text chunks from page {page_num + 1}")
             response = client.embeddings.create(input=texts, model="text-embedding-3-small", dimensions=512)
             embeddings = [data.embedding for data in response.data]
-            print(f"Embeddings generated for page {page_num + 1}")
+            logger.debug(f"Embeddings generated for page {page_num + 1}")
 
             vectors_for_page = []
             for i, embedding in enumerate(embeddings):
@@ -76,17 +117,17 @@ def upload_file():
                 })
             all_vectors.extend(vectors_for_page) # Add to the list of all vectors
             
-            print(f"Upserting {len(vectors_for_page)} vectors for page {page_num + 1} to Pinecone")
+            logger.info(f"Upserting {len(vectors_for_page)} vectors for page {page_num + 1} to Pinecone namespace: {conversation_id}")
             upsert_response = index.upsert(
                 vectors=vectors_for_page,
-                namespace=request.form["id"]
+                namespace=conversation_id
             )
-            print(f"Upsert complete for page {page_num + 1}. Response: {upsert_response}")
+            logger.debug(f"Upsert complete for page {page_num + 1}. Response: {upsert_response}")
         
         # Clean up the temporary file
-        print("Cleaning up temporary file")
+        logger.info("Cleaning up temporary file")
         os.unlink(temp_pdf_path)
-        print("Temporary file cleaned up")
+        logger.debug("Temporary file cleaned up")
         # Convert upsert_response to dict if possible for serialization
         # Ensure the response is JSON serializable
         from flask import jsonify
@@ -106,14 +147,14 @@ def upload_file():
             else:
                 return str(obj)
         if all_vectors: # Check all_vectors instead of docs
-            print("Successfully processed and upserted vectors. Returning success.")
+            logger.info(f"Successfully processed and upserted {len(all_vectors)} vectors for conversation_id: {conversation_id}")
             # Instead of returning a descriptor, return the actual vectors data that was upserted
             # Ensure all objects are JSON serializable
             serializable_vectors = make_serializable(all_vectors)
             return temp_pdf_path
         else:
-            print("No content found after processing. Returning no content message.")
+            logger.warning(f"No content found after processing for conversation_id: {conversation_id}")
             return "No content found."
     except Exception as e:
-        print(f"An error occurred in upload_file: {e}")
-        return f"An error occurred: {e}"
+        logger.error(f"An error occurred in upload_file: {str(e)}", exc_info=True)
+        return f"An error occurred: {str(e)}"
