@@ -1,8 +1,6 @@
-from langchain_openai import ChatOpenAI
-from langchain.agents import AgentExecutor, create_react_agent
+from langchain.agents import create_agent
 from langchain_core.tools import tool
-from langchain_core.prompts import PromptTemplate
-from langchain_core.messages import AIMessage, HumanMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from api.search import search
 from dotenv import load_dotenv
 import json
@@ -19,8 +17,8 @@ logger = logging.getLogger(__name__)
 
 # Store chat histories per conversation ID
 conversation_histories = {}
-# Store agent executors per conversation ID for reuse
-agent_executors = {}
+# Store agents per conversation ID for reuse
+agents = {}
 
 def create_get_info_tool(conversation_id: str):
     """Creates a get_info tool bound to a specific conversation ID."""
@@ -76,69 +74,30 @@ def create_get_info_tool(conversation_id: str):
     
     return get_info
 
-def create_prompt_template(conversation_id: str):
-    """Creates a prompt template with the conversation ID included."""
-    logger.debug(f"Creating prompt template for conversation_id: {conversation_id}")
-    # Format conversation_id directly into the template since it's constant for this conversation
-    template_str = f"""Answer the following questions as best you can. You have access to the following tools:
-{{tools}}
-
-Your purpose is to find information in the uploaded document and return it to the user.
+def create_system_prompt(conversation_id: str) -> str:
+    """Creates a system prompt with the conversation ID included."""
+    logger.debug(f"Creating system prompt for conversation_id: {conversation_id}")
+    return f"""You are a helpful assistant that finds information in uploaded documents.
 
 IMPORTANT: The conversation ID for this session is: {conversation_id}
 The conversation ID is automatically used when searching - you don't need to provide it.
+
+Your purpose is to find information in the uploaded document and return it to the user.
 
 When using the get_info tool:
 - You can provide the query as a plain string (e.g., "what is machine learning?")
 - Or as JSON with a query key (the tool accepts both formats)
 - The tool will automatically search in the correct document using the conversation ID
 
-Use the following format:
-
-Question: the input question you must answer
-Thought: you should always think about what to do
-Action: the action to take, should be one or more of [{{tool_names}}]
-Action Input: the input to the action (just the search query as a string or JSON)
-Observation: the result of the action
-... (this Thought/Action/Action Input/Observation can repeat N times)
-Thought: I now know the final answer
-Final Answer: the final answer to the original input question
-
-Begin!
-
-Chat History:
-{{chat_history}}
-Question: {{input}}
-{{agent_scratchpad}}
-"""
-    return PromptTemplate.from_template(template_str)
-llm = ChatOpenAI(
-    model="gpt-4o",
-    temperature=0,
-    max_tokens=None,
-    timeout=None,
-    max_retries=2,
-    api_key=os.getenv("OPENAI_API_KEY")
-)
+Always be helpful, accurate, and provide clear answers based on the information you find."""
 
 # Chat history types already imported above
-
-def _format_chat_history(chat_history: list) -> str:
-    formatted_history = []
-    for message in chat_history:
-        if isinstance(message, HumanMessage):
-            formatted_history.append(f"User: {message.content}")
-        elif isinstance(message, AIMessage):
-            formatted_history.append(f"Assistant: {message.content}")
-    return "\n".join(formatted_history)
 
 def get_or_create_chat_history(conversation_id: str):
     """Gets or creates a chat history for a conversation ID."""
     if conversation_id not in conversation_histories:
         logger.info(f"Creating new chat history for conversation_id: {conversation_id}")
-        conversation_histories[conversation_id] = [
-            AIMessage(content="Hello! How can I assist you today?")
-        ]
+        conversation_histories[conversation_id] = []
     else:
         logger.debug(f"Retrieving existing chat history for conversation_id: {conversation_id} (length: {len(conversation_histories[conversation_id])})")
     return conversation_histories[conversation_id]
@@ -163,30 +122,27 @@ while True:
     chat_history_list.append(AIMessage(content=agent_response))
 '''
 
-def get_or_create_agent_executor(conversation_id: str):
-    """Gets or creates an agent executor for a conversation ID."""
-    if conversation_id not in agent_executors:
-        logger.info(f"Creating new agent executor for conversation_id: {conversation_id}")
-        # Create tools and prompt bound to this conversation ID
+def get_or_create_agent(conversation_id: str):
+    """Gets or creates an agent for a conversation ID."""
+    if conversation_id not in agents:
+        logger.info(f"Creating new agent for conversation_id: {conversation_id}")
+        # Create tools and system prompt bound to this conversation ID
         tools = [create_get_info_tool(conversation_id)]
-        prompt_template = create_prompt_template(conversation_id)
+        system_prompt = create_system_prompt(conversation_id)
         
-        # Create agent with conversation-specific tools and prompt
-        logger.debug(f"Creating ReAct agent with {len(tools)} tool(s) for conversation_id: {conversation_id}")
-        agent = create_react_agent(llm, tools, prompt=prompt_template)
-        agent_executor = AgentExecutor(
-            agent=agent, 
-            tools=tools, 
-            handle_parsing_errors=True, 
-            max_execution_time=120,  # Increased from 60 seconds
-            max_iterations=15  # Increased from 10 to allow more tool calls
+        # Create agent with conversation-specific tools and system prompt
+        logger.debug(f"Creating agent with {len(tools)} tool(s) for conversation_id: {conversation_id}")
+        agent = create_agent(
+            model="gpt-4o",
+            tools=tools,
+            system_prompt=system_prompt
         )
-        agent_executors[conversation_id] = agent_executor
-        logger.info(f"Agent executor created successfully for conversation_id: {conversation_id}")
+        agents[conversation_id] = agent
+        logger.info(f"Agent created successfully for conversation_id: {conversation_id}")
     else:
-        logger.debug(f"Reusing existing agent executor for conversation_id: {conversation_id}")
+        logger.debug(f"Reusing existing agent for conversation_id: {conversation_id}")
     
-    return agent_executors[conversation_id]
+    return agents[conversation_id]
 
 def process_user_input(user_input: str, conversation_id: str):
     """
@@ -200,32 +156,60 @@ def process_user_input(user_input: str, conversation_id: str):
     chat_history_list = get_or_create_chat_history(conversation_id)
     logger.debug(f"Chat history length before adding user input: {len(chat_history_list)}")
     
-    # Get or create agent executor for this conversation
-    agent_executor = get_or_create_agent_executor(conversation_id)
+    # Get or create agent for this conversation
+    agent = get_or_create_agent(conversation_id)
     
     # Add user input to history
     chat_history_list.append(HumanMessage(content=user_input))
-    formatted_chat_history = _format_chat_history(chat_history_list)
-    logger.debug(f"Formatted chat history length: {len(formatted_chat_history)} characters")
+    
+    # Build messages list for agent invocation (LangChain v1.x format)
+    messages = chat_history_list.copy()
+    logger.debug(f"Invoking agent with {len(messages)} message(s) in history")
 
     # Invoke agent
     try:
-        logger.info(f"Invoking agent executor for conversation_id: {conversation_id}")
-        response = agent_executor.invoke(
-            {
-                "input": user_input,
-                "chat_history": formatted_chat_history,
-            }
-        )
-        agent_response = response["output"]
+        logger.info(f"Invoking agent for conversation_id: {conversation_id}")
+        response = agent.invoke({"messages": messages})
+        
+        # Extract the response - in LangChain v1.x, response contains messages
+        # The response is a dict with "messages" key containing the full conversation
+        if isinstance(response, dict) and "messages" in response:
+            response_messages = response["messages"]
+            # Find the last AIMessage in the response
+            agent_response = None
+            for msg in reversed(response_messages):
+                if isinstance(msg, AIMessage):
+                    agent_response = msg.content
+                    break
+            
+            if agent_response is None:
+                # Fallback: get the last message content
+                if response_messages:
+                    last_msg = response_messages[-1]
+                    if hasattr(last_msg, 'content'):
+                        agent_response = last_msg.content
+                    else:
+                        agent_response = str(last_msg)
+                else:
+                    agent_response = "No response generated"
+        elif isinstance(response, dict) and "output" in response:
+            # Fallback for older format
+            agent_response = response["output"]
+        elif isinstance(response, list) and len(response) > 0:
+            # If response is a list of messages
+            last_msg = response[-1]
+            if hasattr(last_msg, 'content'):
+                agent_response = last_msg.content
+            else:
+                agent_response = str(last_msg)
+        else:
+            agent_response = str(response)
+        
         logger.info(f"Agent execution completed successfully for conversation_id: {conversation_id}")
         logger.debug(f"Agent response (first 200 chars): {agent_response[:200]}...")
         logger.debug(f"Full agent response length: {len(agent_response)} characters")
         
-        # Log intermediate steps if available
-        if "intermediate_steps" in response:
-            logger.debug(f"Agent took {len(response['intermediate_steps'])} intermediate step(s)")
-        
+        # Add agent response to chat history
         chat_history_list.append(AIMessage(content=agent_response))
         logger.debug(f"Chat history length after adding agent response: {len(chat_history_list)}")
         return agent_response
