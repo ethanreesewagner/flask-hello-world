@@ -20,8 +20,8 @@ def create_get_info_tool(conversation_id: str):
     def get_info(tool_input: str) -> str:
         """Searches for information in the uploaded document. 
         Input can be either:
-        1. A JSON string with 'query' key: {{"query": "your search question"}}
-        2. A plain string (will be treated as the query)
+        1. A JSON string with 'query' key (e.g., a JSON object with a query field)
+        2. A plain string (will be treated as the query directly)
         
         The conversation ID is automatically used for the search."""
         query = None
@@ -69,7 +69,7 @@ The conversation ID is automatically used when searching - you don't need to pro
 
 When using the get_info tool:
 - You can provide the query as a plain string (e.g., "what is machine learning?")
-- Or as JSON: {{"query": "what is machine learning?"}}
+- Or as JSON with a query key (the tool accepts both formats)
 - The tool will automatically search in the correct document using the conversation ID
 
 Use the following format:
