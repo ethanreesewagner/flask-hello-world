@@ -8,31 +8,50 @@ import json
 import os
 from langchain.prompts import PromptTemplate
 load_dotenv()
-@tool
-def get_info(tool_input: str) -> str:
-    """Searches for information in a given file based on a query. Input should be a JSON string with 'query' and 'file_path' keys."""
-    try:
-        parsed_input = json.loads(tool_input)
-        query = parsed_input["query"]
-        file_path = parsed_input["file_path"]
-    except (json.JSONDecodeError, KeyError) as e:
-        return f"Error parsing tool input: {e}. Input was: {tool_input}"
-    
-    results = [match['metadata'] for match in search(query, file_path).matches]
-    return "This is the information for the query: " + query + " from the file: " + file_path + " " + str(results)
 
-prompt_template = PromptTemplate.from_template("""Answer the following questions as best you can. You have access to the following tools:
-{tools}
+# Store chat histories per conversation ID
+conversation_histories = {}
+
+def create_get_info_tool(conversation_id: str):
+    """Creates a get_info tool bound to a specific conversation ID."""
+    @tool
+    def get_info(tool_input: str) -> str:
+        """Searches for information in a given file based on a query. Input should be a JSON string with 'query' key. The conversation ID is automatically used."""
+        try:
+            parsed_input = json.loads(tool_input)
+            query = parsed_input["query"]
+        except (json.JSONDecodeError, KeyError) as e:
+            return f"Error parsing input: {str(e)}. Input should be a JSON string with 'query' key."
+        
+        if not conversation_id:
+            return "Error: No conversation ID available. Cannot search."
+        
+        try:
+            results = [match['metadata'] for match in search(query, conversation_id).matches]
+            return "This is the information for the query: " + query + " " + str(results)
+        except Exception as e:
+            return f"Error searching: {str(e)}"
+    
+    return get_info
+
+def create_prompt_template(conversation_id: str):
+    """Creates a prompt template with the conversation ID included."""
+    # Format conversation_id directly into the template since it's constant for this conversation
+    template_str = f"""Answer the following questions as best you can. You have access to the following tools:
+{{tools}}
 
 Your purpose is to find information in the file and return it to the user.
 
-If you need to search the file, you can use the get_info tool.
+IMPORTANT: The conversation ID for this session is: {conversation_id}
+When using the get_info tool, you only need to provide the query - the conversation ID is automatically used.
+
+If you need to search the file, you can use the get_info tool with a JSON string containing only the 'query' key.
 
 Use the following format:
 
 Question: the input question you must answer
 Thought: you should always think about what to do
-Action: the action to take, should be one or more of [{tool_names}]
+Action: the action to take, should be one or more of [{{tool_names}}]
 Action Input: the input to the action
 Observation: the result of the action
 ... (this Thought/Action/Action Input/Observation can repeat N times)
@@ -42,10 +61,11 @@ Final Answer: the final answer to the original input question
 Begin!
 
 Chat History:
-{chat_history}
-Question: {input}
-{agent_scratchpad}
-""")
+{{chat_history}}
+Question: {{input}}
+{{agent_scratchpad}}
+"""
+    return PromptTemplate.from_template(template_str)
 llm = ChatOpenAI(
     model="gpt-4o",
     temperature=0,
@@ -53,8 +73,7 @@ llm = ChatOpenAI(
     timeout=None,
     max_retries=2,
     api_key=os.getenv("OPENAI_API_KEY")
-)    
-tools = [get_info]
+)
 
 # Use with chat history
 from langchain_core.messages import AIMessage, HumanMessage
@@ -63,14 +82,18 @@ def _format_chat_history(chat_history: list) -> str:
     formatted_history = []
     for message in chat_history:
         if isinstance(message, HumanMessage):
-            formatted_history.append(f"{message.content}")
+            formatted_history.append(f"User: {message.content}")
         elif isinstance(message, AIMessage):
-            formatted_history.append(f"{message.content}")
+            formatted_history.append(f"Assistant: {message.content}")
     return "\n".join(formatted_history)
 
-chat_history_list = [
-    AIMessage(content="Hello! How can I assist you today?")
-]
+def get_or_create_chat_history(conversation_id: str):
+    """Gets or creates a chat history for a conversation ID."""
+    if conversation_id not in conversation_histories:
+        conversation_histories[conversation_id] = [
+            AIMessage(content="Hello! How can I assist you today?")
+        ]
+    return conversation_histories[conversation_id]
 
 '''
 while True:
@@ -91,13 +114,28 @@ while True:
     print(f"Agent: {agent_response}")
     chat_history_list.append(AIMessage(content=agent_response))
 '''
-def process_user_input(user_input: str):
-    #Takes user input, saves it to chat history, invokes the agent, saves agent output to history, and returns agent output.
+
+def process_user_input(user_input: str, conversation_id: str):
+    """
+    Takes user input and conversation ID, saves it to chat history, invokes the agent, 
+    saves agent output to history, and returns agent output.
+    """
+    # Get or create chat history for this conversation
+    chat_history_list = get_or_create_chat_history(conversation_id)
+    
+    # Create tools and prompt bound to this conversation ID
+    tools = [create_get_info_tool(conversation_id)]
+    prompt_template = create_prompt_template(conversation_id)
+    
+    # Create agent with conversation-specific tools and prompt
     agent = create_react_agent(llm, tools, prompt=prompt_template)
     agent_executor = AgentExecutor(agent=agent, tools=tools, handle_parsing_errors=True, max_execution_time=60, max_iterations=10)
+    
+    # Add user input to history
     chat_history_list.append(HumanMessage(content=user_input))
     formatted_chat_history = _format_chat_history(chat_history_list)
 
+    # Invoke agent
     response = agent_executor.invoke(
         {
             "input": user_input,

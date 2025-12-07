@@ -17,9 +17,9 @@ CORS(app)
 @app.route('/agent', methods=['POST'])
 def send_to_agent():
     data = request.get_json()
-    message=data["message"]
-    id=data["id"]
-    return process_user_input(message+f" The id is {id}")
+    message = data["message"]
+    conversation_id = data["id"]
+    return process_user_input(message, conversation_id)
 
 @app.route('/upload', methods=['POST'])
 def upload_file():
