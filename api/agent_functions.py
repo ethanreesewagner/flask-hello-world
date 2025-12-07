@@ -11,24 +11,46 @@ load_dotenv()
 
 # Store chat histories per conversation ID
 conversation_histories = {}
+# Store agent executors per conversation ID for reuse
+agent_executors = {}
 
 def create_get_info_tool(conversation_id: str):
     """Creates a get_info tool bound to a specific conversation ID."""
     @tool
     def get_info(tool_input: str) -> str:
-        """Searches for information in a given file based on a query. Input should be a JSON string with 'query' key. The conversation ID is automatically used."""
+        """Searches for information in the uploaded document. 
+        Input can be either:
+        1. A JSON string with 'query' key: {{"query": "your search question"}}
+        2. A plain string (will be treated as the query)
+        
+        The conversation ID is automatically used for the search."""
+        query = None
+        
+        # Try to parse as JSON first
         try:
             parsed_input = json.loads(tool_input)
-            query = parsed_input["query"]
-        except (json.JSONDecodeError, KeyError) as e:
-            return f"Error parsing input: {str(e)}. Input should be a JSON string with 'query' key."
+            if isinstance(parsed_input, dict) and "query" in parsed_input:
+                query = parsed_input["query"]
+            else:
+                # If it's not a dict with query, treat the whole input as query
+                query = tool_input
+        except (json.JSONDecodeError, TypeError):
+            # If not valid JSON, treat the whole input as the query
+            query = tool_input
+        
+        if not query or not query.strip():
+            return "Error: No query provided. Please provide a search query."
         
         if not conversation_id:
             return "Error: No conversation ID available. Cannot search."
         
         try:
-            results = [match['metadata'] for match in search(query, conversation_id).matches]
-            return "This is the information for the query: " + query + " " + str(results)
+            search_results = search(query, conversation_id)
+            if not search_results.matches:
+                return f"No results found for query: {query}"
+            
+            results = [match['metadata'] for match in search_results.matches]
+            return f"Found {len(results)} result(s) for query '{query}': {str(results)}"
         except Exception as e:
             return f"Error searching: {str(e)}"
     
@@ -40,19 +62,22 @@ def create_prompt_template(conversation_id: str):
     template_str = f"""Answer the following questions as best you can. You have access to the following tools:
 {{tools}}
 
-Your purpose is to find information in the file and return it to the user.
+Your purpose is to find information in the uploaded document and return it to the user.
 
 IMPORTANT: The conversation ID for this session is: {conversation_id}
-When using the get_info tool, you only need to provide the query - the conversation ID is automatically used.
+The conversation ID is automatically used when searching - you don't need to provide it.
 
-If you need to search the file, you can use the get_info tool with a JSON string containing only the 'query' key.
+When using the get_info tool:
+- You can provide the query as a plain string (e.g., "what is machine learning?")
+- Or as JSON: {{"query": "what is machine learning?"}}
+- The tool will automatically search in the correct document using the conversation ID
 
 Use the following format:
 
 Question: the input question you must answer
 Thought: you should always think about what to do
 Action: the action to take, should be one or more of [{{tool_names}}]
-Action Input: the input to the action
+Action Input: the input to the action (just the search query as a string or JSON)
 Observation: the result of the action
 ... (this Thought/Action/Action Input/Observation can repeat N times)
 Thought: I now know the final answer
@@ -115,6 +140,26 @@ while True:
     chat_history_list.append(AIMessage(content=agent_response))
 '''
 
+def get_or_create_agent_executor(conversation_id: str):
+    """Gets or creates an agent executor for a conversation ID."""
+    if conversation_id not in agent_executors:
+        # Create tools and prompt bound to this conversation ID
+        tools = [create_get_info_tool(conversation_id)]
+        prompt_template = create_prompt_template(conversation_id)
+        
+        # Create agent with conversation-specific tools and prompt
+        agent = create_react_agent(llm, tools, prompt=prompt_template)
+        agent_executor = AgentExecutor(
+            agent=agent, 
+            tools=tools, 
+            handle_parsing_errors=True, 
+            max_execution_time=120,  # Increased from 60 seconds
+            max_iterations=15  # Increased from 10 to allow more tool calls
+        )
+        agent_executors[conversation_id] = agent_executor
+    
+    return agent_executors[conversation_id]
+
 def process_user_input(user_input: str, conversation_id: str):
     """
     Takes user input and conversation ID, saves it to chat history, invokes the agent, 
@@ -123,26 +168,26 @@ def process_user_input(user_input: str, conversation_id: str):
     # Get or create chat history for this conversation
     chat_history_list = get_or_create_chat_history(conversation_id)
     
-    # Create tools and prompt bound to this conversation ID
-    tools = [create_get_info_tool(conversation_id)]
-    prompt_template = create_prompt_template(conversation_id)
-    
-    # Create agent with conversation-specific tools and prompt
-    agent = create_react_agent(llm, tools, prompt=prompt_template)
-    agent_executor = AgentExecutor(agent=agent, tools=tools, handle_parsing_errors=True, max_execution_time=60, max_iterations=10)
+    # Get or create agent executor for this conversation
+    agent_executor = get_or_create_agent_executor(conversation_id)
     
     # Add user input to history
     chat_history_list.append(HumanMessage(content=user_input))
     formatted_chat_history = _format_chat_history(chat_history_list)
 
     # Invoke agent
-    response = agent_executor.invoke(
-        {
-            "input": user_input,
-            "chat_history": formatted_chat_history,
-        }
-    )
-    agent_response = response["output"]
-    chat_history_list.append(AIMessage(content=agent_response))
-    return agent_response
+    try:
+        response = agent_executor.invoke(
+            {
+                "input": user_input,
+                "chat_history": formatted_chat_history,
+            }
+        )
+        agent_response = response["output"]
+        chat_history_list.append(AIMessage(content=agent_response))
+        return agent_response
+    except Exception as e:
+        error_msg = f"Agent execution error: {str(e)}"
+        chat_history_list.append(AIMessage(content=error_msg))
+        return error_msg
     
