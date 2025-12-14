@@ -21,7 +21,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
-CORS(app)
+CORS(app, origins="*", supports_credentials=False)  # * for all origins
 
 @app.route('/agent', methods=['POST'])
 def send_to_agent():
